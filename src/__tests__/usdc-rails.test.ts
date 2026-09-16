@@ -1,7 +1,8 @@
 /**
  * USDC Payment Rails Tests
  *
- * Tests for direct USDC transfers, payment requests, and incoming payment detection.
+ * Tests for direct USDC transfers and basic payment request management.
+ * On-chain receipt verification is tested in payment-verification.test.ts.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -11,9 +12,7 @@ import {
   createPaymentRequest,
   listPaymentRequests,
   markPaymentRequestPaid,
-  detectIncomingPayments,
 } from "../payment/requests.js";
-import { ulid } from "ulid";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address } from "viem";
 
@@ -21,7 +20,6 @@ describe("USDC Payment Rails", () => {
   let dbApi: ReturnType<typeof createDatabase>;
 
   beforeEach(() => {
-    // The runtime DB API owns the single in-memory SQLite connection.
     dbApi = createDatabase(":memory:");
   });
 
@@ -38,7 +36,7 @@ describe("USDC Payment Rails", () => {
       expect(result0.success).toBe(false);
       expect(result0.error).toContain("positive");
 
-      const resultNeg = await sendUsdc({ to, amountUsd: -5, account, db: dbApi });
+      const resultNeg = await sendUsdc({ to, amountUsd: -5, account, db: dbApi.raw });
       expect(resultNeg.success).toBe(false);
     });
 
@@ -51,31 +49,27 @@ describe("USDC Payment Rails", () => {
         amountUsd: 1,
         account,
         network: "eip155:9999" as any,
-        db: dbApi,
+        db: dbApi.raw,
       });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("Unsupported network");
     });
 
-    it("records pending transaction in database on success", async () => {
-      // This test will fail until we implement the actual send logic
-      // For now, it tests the database recording path
+    it("returns an error (not crash) when RPC is unavailable", async () => {
       const account = privateKeyToAccount(generatePrivateKey());
       const to = "0x1234567890123456789012345678901234567890" as Address;
 
-      // Without a real RPC, this will fail at the network level
-      // But we're testing the error handling and database path
       const result = await sendUsdc({
         to,
         amountUsd: 1,
         account,
         network: "eip155:8453",
-        db: dbApi,
+        db: dbApi.raw,
         reference: "test-payment",
       });
 
-      // Will fail due to no RPC, but should handle gracefully
+      // No RPC configured — should fail gracefully, not throw
       expect(result.success).toBe(false);
       expect(result.error).toBeDefined();
     });
@@ -129,69 +123,6 @@ describe("USDC Payment Rails", () => {
       const paid = listPaymentRequests(dbApi.raw, { status: "paid" });
       expect(paid).toHaveLength(1);
       expect(paid[0].txHash).toBe(txHash);
-    });
-  });
-
-  describe("Incoming Payment Detection", () => {
-    it("detects no payments when no previous balance recorded", async () => {
-      // First call with no baseline: should not fabricate a payment
-      const detected = await detectIncomingPayments(dbApi.raw, 0);
-      expect(detected).toHaveLength(0);
-    });
-
-    it("marks a pending request paid when balance increases to cover it", async () => {
-      const payer = "0xabcdef1234567890123456789012345678901234" as Address;
-
-      // Baseline at 0, no wire in
-      await detectIncomingPayments(dbApi.raw, 0);
-
-      // Create a payment request
-      createPaymentRequest(dbApi.raw, {
-        amountUsd: 50,
-        payer,
-        reference: "inv-4",
-      });
-
-      // Balance jumps to $50 -> matches the pending request
-      const detected = await detectIncomingPayments(dbApi.raw, 50);
-      expect(detected).toHaveLength(1);
-      expect(detected[0].reference).toBe("inv-4");
-      expect(detected[0].status).toBe("paid");
-
-      // Request is no longer pending
-      const pending = listPaymentRequests(dbApi.raw, { status: "pending" });
-      expect(pending).toHaveLength(0);
-    });
-
-    it("does not re-mark a request paid on subsequent checks", async () => {
-      const payer = "0xabcdef1234567890123456789012345678901234" as Address;
-
-      await detectIncomingPayments(dbApi.raw, 0);
-      createPaymentRequest(dbApi.raw, { amountUsd: 25, payer, reference: "inv-5" });
-
-      await detectIncomingPayments(dbApi.raw, 25);
-      const again = await detectIncomingPayments(dbApi.raw, 25);
-      expect(again).toHaveLength(0); // no new delta, no re-marking
-    });
-
-    it("expires stale payment requests", async () => {
-      const payer = "0xabcdef1234567890123456789012345678901234" as Address;
-
-      await detectIncomingPayments(dbApi.raw, 0);
-
-      // Create a request that has already expired
-      const request = createPaymentRequest(dbApi.raw, {
-        amountUsd: 10,
-        payer,
-        reference: "inv-expired",
-        expiresInHours: 1, // expires 1 hour from now
-      });
-      // Force its expiry into the past (simulate an old request)
-      dbApi.raw.prepare("UPDATE payment_requests SET expires_at = ? WHERE id = ?").run("2000-01-01T00:00:00Z", request.id);
-
-      await detectIncomingPayments(dbApi.raw, 0);
-      const expired = listPaymentRequests(dbApi.raw, { status: "expired" });
-      expect(expired.map((r) => r.reference)).toContain("inv-expired");
     });
   });
 });

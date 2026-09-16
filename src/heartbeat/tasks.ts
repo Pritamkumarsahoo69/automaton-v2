@@ -198,27 +198,37 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
     return { shouldWake: false };
   },
 
-  // === Phase 5: Payment Request Detection ===
+  // === Phase 5: Verified Base USDC Payment Detection ===
   check_pending_payments: async (ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
     try {
-      const { listPaymentRequests, detectIncomingPayments } = await import("../payment/requests.js");
+      const { listPaymentRequests, verifyPendingBaseUsdcPayments } = await import("../payment/requests.js");
       const pending = listPaymentRequests(taskCtx.db.raw, { status: "pending" });
 
       if (pending.length === 0) {
         return { shouldWake: false };
       }
 
-      // Detect incoming payments using current USDC balance
-      const detected = await detectIncomingPayments(
-        taskCtx.db.raw,
-        ctx.usdcBalance,
-      );
+      // Only verify on EVM (Base) wallets — Solana is not supported for on-chain receipt matching yet
+      const chainType = taskCtx.config.chainType || taskCtx.identity.chainType || "evm";
+      if (chainType !== "evm") {
+        return { shouldWake: false };
+      }
 
-      if (detected.length > 0) {
-        const totalPaid = detected.reduce((sum, p) => sum + p.amountUsd, 0);
+      const network: "eip155:8453" | "eip155:84532" = "eip155:8453";
+      const policy = taskCtx.config.treasuryPolicy ?? {};
+      const requiredConfirmations = (taskCtx.config.revenuePolicy?.requiredPaymentConfirmations as number) ?? 3;
+
+      const receipts = await verifyPendingBaseUsdcPayments(taskCtx.db.raw, {
+        recipient: taskCtx.identity.address as `0x${string}`,
+        network,
+        requiredConfirmations,
+      });
+
+      if (receipts.length > 0) {
+        const totalPaid = receipts.reduce((sum: number, p: any) => sum + Number(p.amountAtomic) / 1_000_000, 0);
         return {
           shouldWake: true,
-          message: `Payment received: $${totalPaid.toFixed(2)} from ${detected.length} request(s). Detected via balance check.`,
+          message: `Verified payment received: $${totalPaid.toFixed(2)} from ${receipts.length} on-chain transfer(s) on Base.`,
         };
       }
 

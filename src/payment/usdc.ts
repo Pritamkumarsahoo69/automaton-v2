@@ -10,7 +10,6 @@ import {
   createPublicClient,
   http,
   parseUnits,
-  formatUnits,
   type Address,
   type PrivateKeyAccount,
   type Hex,
@@ -47,6 +46,53 @@ const ERC20_TRANSFER_ABI = [
     type: "function",
   },
 ] as const;
+
+// ERC-20 Transfer event ABI for log filtering
+export const USDC_TRANSFER_EVENT_ABI = [
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "from", type: "address" },
+      { indexed: true, name: "to", type: "address" },
+      { indexed: false, name: "value", type: "uint256" },
+    ],
+    name: "Transfer",
+    type: "event",
+  },
+] as const;
+
+/** Supported Base networks for USDC operations. */
+export type BaseUsdcNetwork = "eip155:8453" | "eip155:84532";
+
+/** USDC contract addresses per network (exported for verifier use). */
+export const BASE_USDC_ADDRESSES: Record<BaseUsdcNetwork, Address> = {
+  "eip155:8453": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "eip155:84532": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+};
+
+/** Chain objects per network (exported for client creation). */
+export const BASE_USDC_CHAINS: Record<BaseUsdcNetwork, any> = {
+  "eip155:8453": base,
+  "eip155:84532": baseSepolia,
+};
+
+/**
+ * Create a viem public client configured for querying Base USDC transfer logs.
+ * Falls back to public RPC when no custom endpoint is provided.
+ */
+export function createBaseUsdcLogClient(
+  network: BaseUsdcNetwork,
+  rpcUrl?: string,
+): any {
+  const chain = BASE_USDC_CHAINS[network];
+  if (!chain) {
+    throw new Error(`Unsupported Base network: ${network}`);
+  }
+  return createPublicClient({
+    chain,
+    transport: http(rpcUrl ?? undefined, { timeout: 15_000 }),
+  });
+}
 
 export interface SendUsdcOptions {
   to: Address;
