@@ -31,15 +31,36 @@ export const DEFAULT_REVENUE_POLICY: RevenuePolicy = {
   requiredPaymentConfirmations: 3,
 };
 
-export type DeliveryEvidenceKind = "file" | "url" | "hosted_endpoint";
-
-export interface DeliveryEvidence {
-  kind: DeliveryEvidenceKind;
-  ref: string;
-  checksum?: string;
+// Discriminated union: each evidence kind carries its own fields.
+// Task 5 evidence validators consume these shapes directly.
+export interface FileEvidence {
+  kind: "file";
+  path: string;
+  sha256: string;
   mimeType?: string;
-  label?: string;
 }
+
+export interface GitCommitEvidence {
+  kind: "git_commit";
+  hash: string;
+}
+
+export interface ServiceEvidence {
+  kind: "service";
+  url: string;
+  sandboxId: string;
+}
+
+export interface SourceSummaryEvidence {
+  kind: "source_summary";
+  text: string;
+}
+
+export type DeliveryEvidence =
+  | FileEvidence
+  | GitCommitEvidence
+  | ServiceEvidence
+  | SourceSummaryEvidence;
 
 export interface RevenueJob {
   id: string;
@@ -79,12 +100,4 @@ export interface CreateRevenueJobInput {
   scope: string;
   priceCents: number;
   budgetCents?: number;
-  deliveryRequirements?: Record<string, unknown>;
-}
-
-export interface QuoteRevenueJobInput {
-  jobId: string;
-  priceCents: number;
-  budgetCents?: number;
-  paymentRequestId?: string;
 }

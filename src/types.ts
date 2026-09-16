@@ -104,9 +104,11 @@ export type {
   RevenueJob,
   RevenueJobEvent,
   DeliveryEvidence,
-  DeliveryEvidenceKind,
+  FileEvidence,
+  GitCommitEvidence,
+  ServiceEvidence,
+  SourceSummaryEvidence,
   CreateRevenueJobInput,
-  QuoteRevenueJobInput,
 } from "./revenue/types.js";
 export {
   REVENUE_JOB_TYPES,
