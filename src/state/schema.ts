@@ -5,7 +5,7 @@
  * The database IS the automaton's memory.
  */
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export const CREATE_TABLES = `
   -- Schema version tracking
@@ -678,6 +678,75 @@ export const MIGRATION_V12 = `
   CREATE INDEX IF NOT EXISTS idx_payment_requests_status ON payment_requests(status);
   CREATE INDEX IF NOT EXISTS idx_payment_requests_payer ON payment_requests(payer);
   CREATE INDEX IF NOT EXISTS idx_payment_requests_reference ON payment_requests(reference);
+`;
+
+export const MIGRATION_V13_ALTER = `
+  -- Schema version: 13
+  -- Add payment receipt provenance column to payment_requests
+  ALTER TABLE payment_requests ADD COLUMN payment_not_before_block TEXT;
+`;
+
+export const MIGRATION_V13 = `
+  -- Schema version: 13
+  -- Revenue Job Engine: payment receipt provenance, job records, and audit events
+
+  CREATE TABLE IF NOT EXISTS payment_verifications (
+    payment_request_id TEXT PRIMARY KEY REFERENCES payment_requests(id),
+    tx_hash TEXT NOT NULL,
+    log_index INTEGER NOT NULL,
+    block_number TEXT NOT NULL,
+    from_address TEXT NOT NULL,
+    to_address TEXT NOT NULL,
+    amount_atomic TEXT NOT NULL,
+    verified_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(tx_hash, log_index)
+  );
+
+  CREATE TABLE IF NOT EXISTS revenue_jobs (
+    id TEXT PRIMARY KEY,
+    customer_address TEXT NOT NULL,
+    job_type TEXT NOT NULL CHECK(job_type IN (
+      'research','writing','data_analysis','code_change',
+      'code_review','file_generation','hosted_service'
+    )),
+    scope TEXT NOT NULL,
+    price_cents INTEGER NOT NULL CHECK(price_cents > 0),
+    budget_cents INTEGER NOT NULL CHECK(budget_cents >= 0),
+    status TEXT NOT NULL CHECK(status IN (
+      'draft','quoted','awaiting_payment','paid','executing',
+      'awaiting_delivery_review','delivered','cancelled','expired',
+      'failed','refunded_pending_creator_approval'
+    )),
+    payment_request_id TEXT UNIQUE REFERENCES payment_requests(id),
+    goal_id TEXT UNIQUE REFERENCES goals(id),
+    delivery_requirements TEXT NOT NULL DEFAULT '{}',
+    delivery_evidence TEXT NOT NULL DEFAULT '[]',
+    failure_reason TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    quoted_at TEXT,
+    paid_at TEXT,
+    started_at TEXT,
+    delivered_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS revenue_job_events (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL REFERENCES revenue_jobs(id),
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_revenue_jobs_status ON revenue_jobs(status);
+  CREATE INDEX IF NOT EXISTS idx_revenue_jobs_payment ON revenue_jobs(payment_request_id);
+  CREATE INDEX IF NOT EXISTS idx_revenue_jobs_goal ON revenue_jobs(goal_id);
+  CREATE INDEX IF NOT EXISTS idx_revenue_jobs_customer ON revenue_jobs(customer_address);
+  CREATE INDEX IF NOT EXISTS idx_revenue_events_job ON revenue_job_events(job_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_payment_verifications_tx ON payment_verifications(tx_hash);
 `;
 
 export const MIGRATION_V10 = `

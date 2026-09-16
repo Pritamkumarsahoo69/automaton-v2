@@ -68,6 +68,8 @@ export interface AutomatonConfig {
   parentAddress?: string;
   socialRelayUrl?: string;
   treasuryPolicy?: TreasuryPolicy;
+  /** Revenue job engine policy (disabled by default) */
+  revenuePolicy?: import("./revenue/types.js").RevenuePolicy;
   // Phase 2 config additions
   soulConfig?: SoulConfig;
   modelStrategy?: ModelStrategyConfig;
@@ -91,6 +93,26 @@ export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
   childSandboxMemoryMb: 1024,
   socialRelayUrl: "https://social.conway.tech",
 };
+
+// ─── Revenue Job Engine ─────────────────────────────────────────────
+// Revenue types are defined in their own module; re-export so that
+// `import { RevenueJob } from "../../types.js"` keeps working uniformly.
+export type {
+  RevenueJobType,
+  RevenueJobStatus,
+  RevenuePolicy,
+  RevenueJob,
+  RevenueJobEvent,
+  DeliveryEvidence,
+  DeliveryEvidenceKind,
+  CreateRevenueJobInput,
+  QuoteRevenueJobInput,
+} from "./revenue/types.js";
+export {
+  REVENUE_JOB_TYPES,
+  REVENUE_JOB_STATUSES,
+  DEFAULT_REVENUE_POLICY,
+} from "./revenue/types.js";
 
 // ─── Agent State ─────────────────────────────────────────────────
 

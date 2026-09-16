@@ -48,6 +48,8 @@ import {
   MIGRATION_V10,
   MIGRATION_V11,
   MIGRATION_V12,
+  MIGRATION_V13_ALTER,
+  MIGRATION_V13,
 } from "./schema.js";
 import type {
   RiskLevel,
@@ -631,6 +633,15 @@ function applyMigrations(db: DatabaseType): void {
       version: 12,
       apply: () => {
         try { db.exec(MIGRATION_V12); } catch { /* table may already exist */ }
+      },
+    },
+    {
+      version: 13,
+      apply: () => {
+        // Catch only the duplicate-column error for payment_not_before_block,
+        // then run the remaining table/index statements in the same migration.
+        try { db.exec(MIGRATION_V13_ALTER); } catch { logger.debug("V13 ALTER (payment_not_before_block) skipped — column likely exists"); }
+        db.exec(MIGRATION_V13);
       },
     },
   ];

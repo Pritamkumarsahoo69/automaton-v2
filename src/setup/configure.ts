@@ -11,8 +11,8 @@
 import readline from "readline";
 import chalk from "chalk";
 import { loadConfig, saveConfig, resolvePath } from "../config.js";
-import { DEFAULT_TREASURY_POLICY, DEFAULT_MODEL_STRATEGY_CONFIG } from "../types.js";
-import type { AutomatonConfig, ModelStrategyConfig, TreasuryPolicy, ModelEntry } from "../types.js";
+import { DEFAULT_TREASURY_POLICY, DEFAULT_MODEL_STRATEGY_CONFIG, DEFAULT_REVENUE_POLICY } from "../types.js";
+import type { AutomatonConfig, ModelStrategyConfig, TreasuryPolicy, RevenuePolicy, ModelEntry } from "../types.js";
 import { closePrompts } from "./prompts.js";
 import { createDatabase } from "../state/database.js";
 import { ModelRegistry } from "../inference/registry.js";
@@ -186,7 +186,8 @@ function printMainMenu(config: AutomatonConfig): void {
   console.log(`  ${chalk.white("1.")} Inference Providers   ${dim(providers)}`);
   console.log(`  ${chalk.white("2.")} Model Strategy        ${dim(config.inferenceModel)} / ${dim(strategy.maxTokensPerTurn + " tokens")}`);
   console.log(`  ${chalk.white("3.")} Treasury Policy       ${dim("max transfer: " + (config.treasuryPolicy?.maxSingleTransferCents ?? DEFAULT_TREASURY_POLICY.maxSingleTransferCents) + "¢")}`);
-  console.log(`  ${chalk.white("4.")} General               ${dim(config.name)} / ${dim(config.logLevel)}`);
+  console.log(`  ${chalk.white("4.")} Revenue Policy        ${dim((config.revenuePolicy?.enabled ? "enabled" : "disabled") + ", max job: " + (config.revenuePolicy?.maxJobBudgetCents ?? DEFAULT_REVENUE_POLICY.maxJobBudgetCents) + "¢")}`);
+  console.log(`  ${chalk.white("5.")} General              ${dim(config.name)} / ${dim(config.logLevel)}`);
   console.log("");
   console.log(chalk.dim("  q  Quit"));
   console.log("");
@@ -299,6 +300,39 @@ async function configureTreasury(config: AutomatonConfig): Promise<void> {
   console.log("");
 }
 
+// ─── Section: Revenue Policy ────────────────────────────────────
+
+async function configureRevenue(config: AutomatonConfig): Promise<void> {
+  console.log(chalk.cyan("\n  ── Revenue Policy ─────────────────────────────\n"));
+  console.log(chalk.dim("  All values are in cents (100 cents = $1.00).\n"));
+
+  const r: RevenuePolicy = {
+    ...DEFAULT_REVENUE_POLICY,
+    ...(config.revenuePolicy ?? {}),
+  };
+
+  r.enabled = await askBool("Enable revenue job processing", r.enabled);
+  r.maxJobBudgetCents = await askNumber("Max job budget", r.maxJobBudgetCents);
+  r.maxActiveJobs = await askNumber("Max active jobs", r.maxActiveJobs);
+  r.requiredPaymentConfirmations = await askNumber(
+    "Required payment confirmations",
+    r.requiredPaymentConfirmations,
+  );
+
+  const domainsRaw = await ask(
+    `  ${chalk.white("→")} Allowed service domains (comma-separated, current: ${dim(r.ownedServiceDomains.join(", ") || "(none)")})${chalk.dim(" (Enter to keep)")}: `,
+  );
+  if (domainsRaw !== "") {
+    r.ownedServiceDomains = domainsRaw
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  config.revenuePolicy = r;
+  console.log("");
+}
+
 // ─── Section: General ─────────────────────────────────────────────
 
 async function configureGeneral(config: AutomatonConfig): Promise<void> {
@@ -349,6 +383,11 @@ export async function runConfigure(): Promise<void> {
         console.log(chalk.green("  ✓ Treasury policy saved.\n"));
         break;
       case "4":
+        await configureRevenue(config);
+        saveConfig(config);
+        console.log(chalk.green("  ✓ Revenue policy saved.\n"));
+        break;
+      case "5":
         await configureGeneral(config);
         saveConfig(config);
         console.log(chalk.green("  ✓ General settings saved.\n"));
@@ -358,7 +397,7 @@ export async function runConfigure(): Promise<void> {
         running = false;
         break;
       default:
-        console.log(chalk.yellow(`  Unknown option: "${choice}". Enter 1-4 or q.\n`));
+        console.log(chalk.yellow(`  Unknown option: "${choice}". Enter 1-5 or q.\n`));
     }
   }
 

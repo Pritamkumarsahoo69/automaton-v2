@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import chalk from "chalk";
-import type { AutomatonConfig, TreasuryPolicy } from "../types.js";
-import { DEFAULT_TREASURY_POLICY } from "../types.js";
+import type { AutomatonConfig, TreasuryPolicy, RevenuePolicy } from "../types.js";
+import { DEFAULT_TREASURY_POLICY, DEFAULT_REVENUE_POLICY } from "../types.js";
 import { getWallet, getAutomatonDir } from "../identity/wallet.js";
 import { provision } from "../identity/provision.js";
 import { createConfig, saveConfig } from "../config.js";
@@ -160,6 +160,10 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
 
   console.log(chalk.green("  Treasury policy configured.\n"));
 
+  // ─── Revenue Policy (kept disabled by default) ─────────────────
+  const revenuePolicy: RevenuePolicy = { ...DEFAULT_REVENUE_POLICY };
+  console.log(chalk.dim("  Revenue job processing will be disabled until enabled via --configure.\n"));
+
   // ─── 4. Detect environment ────────────────────────────────────
   console.log(chalk.cyan("  [4/6] Detecting environment..."));
   const env = detectEnvironment();
@@ -184,6 +188,7 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
     anthropicApiKey: anthropicApiKey || undefined,
     ollamaBaseUrl,
     treasuryPolicy,
+    revenuePolicy,
     chainType: walletChainType,
   });
 

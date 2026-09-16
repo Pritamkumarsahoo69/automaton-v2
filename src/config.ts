@@ -8,6 +8,8 @@ import fs from "fs";
 import path from "path";
 import type { AutomatonConfig, TreasuryPolicy, ModelStrategyConfig, SoulConfig } from "./types.js";
 import { DEFAULT_CONFIG, DEFAULT_TREASURY_POLICY, DEFAULT_MODEL_STRATEGY_CONFIG, DEFAULT_SOUL_CONFIG } from "./types.js";
+import type { RevenuePolicy } from "./revenue/types.js";
+import { DEFAULT_REVENUE_POLICY } from "./revenue/types.js";
 import { getAutomatonDir } from "./identity/wallet.js";
 import { loadApiKeyFromConfig } from "./identity/provision.js";
 import { createLogger } from "./observability/logger.js";
@@ -61,6 +63,12 @@ export function loadConfig(): AutomatonConfig | null {
       ...(raw.soulConfig ?? {}),
     };
 
+    // Deep-merge revenue policy with defaults
+    const revenuePolicy: RevenuePolicy = {
+      ...DEFAULT_REVENUE_POLICY,
+      ...(raw.revenuePolicy ?? {}),
+    };
+
     return {
       ...DEFAULT_CONFIG,
       ...raw,
@@ -72,6 +80,7 @@ export function loadConfig(): AutomatonConfig | null {
       treasuryPolicy,
       modelStrategy,
       soulConfig,
+      revenuePolicy,
       chainType: raw.chainType || "evm",
     } as AutomatonConfig;
   } catch {
@@ -95,6 +104,7 @@ export function saveConfig(config: AutomatonConfig): void {
     treasuryPolicy: config.treasuryPolicy ?? DEFAULT_TREASURY_POLICY,
     modelStrategy: config.modelStrategy ?? DEFAULT_MODEL_STRATEGY_CONFIG,
     soulConfig: config.soulConfig ?? DEFAULT_SOUL_CONFIG,
+    revenuePolicy: config.revenuePolicy ?? DEFAULT_REVENUE_POLICY,
   };
   fs.writeFileSync(configPath, JSON.stringify(toSave, null, 2), {
     mode: 0o600,
@@ -128,6 +138,7 @@ export function createConfig(params: {
   ollamaBaseUrl?: string;
   parentAddress?: string;
   treasuryPolicy?: TreasuryPolicy;
+  revenuePolicy?: RevenuePolicy;
   chainType?: ChainType;
 }): AutomatonConfig {
   const normalizedSandboxId = (params.sandboxId || "").trim();
@@ -156,6 +167,7 @@ export function createConfig(params: {
     maxChildren: DEFAULT_CONFIG.maxChildren || 3,
     parentAddress: params.parentAddress,
     treasuryPolicy: params.treasuryPolicy ?? DEFAULT_TREASURY_POLICY,
+    revenuePolicy: params.revenuePolicy ?? DEFAULT_REVENUE_POLICY,
     chainType: params.chainType || "evm",
   };
 }
