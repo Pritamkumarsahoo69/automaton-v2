@@ -295,6 +295,100 @@ function createRequireConfirmationRule(policy: TreasuryPolicy): PolicyRule {
 }
 
 /**
+ * Deny USDC single transfers above the configured max.
+ */
+function createUsdcMaxSingleRule(policy: TreasuryPolicy): PolicyRule {
+  return {
+    id: "financial.usdc_max_single",
+    description: `Deny USDC transfers above $${(policy.maxUsdcSingleTransfer / 100).toFixed(2)}`,
+    priority: 500,
+    appliesTo: { by: "name", names: ["send_usdc"] },
+    evaluate(request: PolicyRequest): PolicyRuleResult | null {
+      const amount = request.args.amount_usd as number | undefined;
+      if (amount === undefined) return null;
+      const amountCents = Math.round(amount * 100);
+
+      if (amountCents > policy.maxUsdcSingleTransfer) {
+        return deny(
+          "financial.usdc_max_single",
+          "USDC_SPEND_LIMIT_EXCEEDED",
+          `USDC transfer of $${amount.toFixed(2)} exceeds single transfer max of $${(policy.maxUsdcSingleTransfer / 100).toFixed(2)}`,
+        );
+      }
+
+      return null;
+    },
+  };
+}
+
+/**
+ * Deny USDC transfers to recipients not in the allowlist.
+ * Empty allowlist = all allowed (per creator-approved blueprint).
+ */
+function createUsdcRecipientAllowlistRule(policy: TreasuryPolicy): PolicyRule {
+  return {
+    id: "financial.usdc_recipient_allowlist",
+    description: "Deny USDC transfers to addresses not in allowlist",
+    priority: 500,
+    appliesTo: { by: "name", names: ["send_usdc"] },
+    evaluate(request: PolicyRequest): PolicyRuleResult | null {
+      const to = request.args.to as string | undefined;
+      if (!to) return null;
+
+      const allowedRecipients = policy.usdcAllowedRecipients;
+      if (allowedRecipients.length === 0) {
+        // Empty = all allowed (creator approved blueprint)
+        return null;
+      }
+
+      const normalizedTo = to.toLowerCase();
+      const isAllowed = allowedRecipients.some(
+        (addr) => addr.toLowerCase() === normalizedTo,
+      );
+
+      if (!isAllowed) {
+        return deny(
+          "financial.usdc_recipient_allowlist",
+          "RECIPIENT_NOT_ALLOWED",
+          `Recipient "${to}" not in USDC allowlist: [${allowedRecipients.join(", ")}]`,
+        );
+      }
+
+      return null;
+    },
+  };
+}
+
+/**
+ * Return 'quarantine' for USDC amounts above requireUsdcConfirmationAbove.
+ * This implements the "approve blueprint once, auto-execute within it" behavior.
+ */
+function createUsdcRequireConfirmationRule(policy: TreasuryPolicy): PolicyRule {
+  return {
+    id: "financial.usdc_require_confirmation",
+    description: `Quarantine USDC transfers above $${(policy.requireUsdcConfirmationAbove / 100).toFixed(2)} for confirmation`,
+    priority: 500,
+    appliesTo: { by: "name", names: ["send_usdc"] },
+    evaluate(request: PolicyRequest): PolicyRuleResult | null {
+      const amount = request.args.amount_usd as number | undefined;
+      if (amount === undefined) return null;
+      const amountCents = Math.round(amount * 100);
+
+      if (amountCents > policy.requireUsdcConfirmationAbove) {
+        return {
+          rule: "financial.usdc_require_confirmation",
+          action: "quarantine",
+          reasonCode: "USDC_CONFIRMATION_REQUIRED",
+          humanMessage: `USDC transfer of $${amount.toFixed(2)} exceeds confirmation threshold of $${(policy.requireUsdcConfirmationAbove / 100).toFixed(2)}. Creator approval required.`,
+        };
+      }
+
+      return null;
+    },
+  };
+}
+
+/**
  * Create all financial policy rules.
  */
 export function createFinancialRules(
@@ -310,5 +404,11 @@ export function createFinancialRules(
     createTurnTransferLimitRule(treasuryPolicy),
     createInferenceDailyCapRule(treasuryPolicy),
     createRequireConfirmationRule(treasuryPolicy),
+    // USDC-on-Base rules (Phase 5)
+    // Note: USDC hourly/daily caps are enforced inside the send_usdc tool
+    // (policy rules lack per-tool DB aggregation).
+    createUsdcMaxSingleRule(treasuryPolicy),
+    createUsdcRecipientAllowlistRule(treasuryPolicy),
+    createUsdcRequireConfirmationRule(treasuryPolicy),
   ];
 }

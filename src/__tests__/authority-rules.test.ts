@@ -687,7 +687,7 @@ describe("Treasury Config", () => {
 
   it("all default values are positive", () => {
     for (const [key, value] of Object.entries(DEFAULT_TREASURY_POLICY)) {
-      if (key === "x402AllowedDomains") continue;
+      if (key === "x402AllowedDomains" || key === "usdcAllowedRecipients") continue;
       expect(typeof value).toBe("number");
       expect(value).toBeGreaterThanOrEqual(0);
     }

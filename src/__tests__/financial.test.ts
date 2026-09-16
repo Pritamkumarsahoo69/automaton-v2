@@ -506,8 +506,8 @@ describe("Financial Policy Rules", () => {
   });
 
   describe("Rules are registered", () => {
-    it("creates 9 financial rules (7 Phase 0 + 2 Phase 1)", () => {
-      expect(rules.length).toBe(9);
+    it("creates 12 financial rules including USDC-on-Base protections", () => {
+      expect(rules.length).toBe(12);
     });
 
     it("all rules have priority 500", () => {

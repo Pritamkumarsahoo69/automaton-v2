@@ -286,6 +286,15 @@ async function configureTreasury(config: AutomatonConfig): Promise<void> {
     t.requireConfirmationAboveCents,
   );
 
+  // USDC-on-Base payment rails (Phase 5)
+  t.maxUsdcSingleTransfer = await askNumber("Max USDC single transfer (cents)", t.maxUsdcSingleTransfer);
+  t.maxUsdcHourlyTransfer = await askNumber("Max USDC hourly transfers (cents)", t.maxUsdcHourlyTransfer);
+  t.maxUsdcDailyTransfer = await askNumber("Max USDC daily transfers (cents)", t.maxUsdcDailyTransfer);
+  t.requireUsdcConfirmationAbove = await askNumber(
+    "USDC confirmation required above (cents)",
+    t.requireUsdcConfirmationAbove,
+  );
+
   config.treasuryPolicy = t;
   console.log("");
 }

@@ -578,6 +578,12 @@ export interface TreasuryPolicy {
   maxTransfersPerTurn: number;
   maxInferenceDailyCents: number;
   requireConfirmationAboveCents: number;
+  // USDC-on-Base payment rails (Phase 5)
+  maxUsdcSingleTransfer: number;        // Max USDC per transfer
+  maxUsdcHourlyTransfer: number;        // Max USDC per hour
+  maxUsdcDailyTransfer: number;         // Max USDC per day
+  usdcAllowedRecipients: string[];      // Allowlist of approved recipient addresses (empty = all)
+  requireUsdcConfirmationAbove: number; // USDC amount requiring manual confirmation
 }
 
 export const DEFAULT_TREASURY_POLICY: TreasuryPolicy = {
@@ -591,6 +597,12 @@ export const DEFAULT_TREASURY_POLICY: TreasuryPolicy = {
   maxTransfersPerTurn: 2,
   maxInferenceDailyCents: 50000,
   requireConfirmationAboveCents: 1000,
+  // USDC defaults
+  maxUsdcSingleTransfer: 100,           // $100 max per USDC transfer
+  maxUsdcHourlyTransfer: 250,           // $250 max per hour
+  maxUsdcDailyTransfer: 500,            // $500 max per day
+  usdcAllowedRecipients: [],            // Empty = allow all (creator-approved blueprint)
+  requireUsdcConfirmationAbove: 25,     // $25+ requires confirmation
 };
 
 // ─── Phase 1: Inbox Message Status ──────────────────────────────

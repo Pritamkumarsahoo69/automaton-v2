@@ -198,6 +198,37 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
     return { shouldWake: false };
   },
 
+  // === Phase 5: Payment Request Detection ===
+  check_pending_payments: async (ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
+    try {
+      const { listPaymentRequests, detectIncomingPayments } = await import("../payment/requests.js");
+      const pending = listPaymentRequests(taskCtx.db.raw, { status: "pending" });
+
+      if (pending.length === 0) {
+        return { shouldWake: false };
+      }
+
+      // Detect incoming payments using current USDC balance
+      const detected = await detectIncomingPayments(
+        taskCtx.db.raw,
+        ctx.usdcBalance,
+      );
+
+      if (detected.length > 0) {
+        const totalPaid = detected.reduce((sum, p) => sum + p.amountUsd, 0);
+        return {
+          shouldWake: true,
+          message: `Payment received: $${totalPaid.toFixed(2)} from ${detected.length} request(s). Detected via balance check.`,
+        };
+      }
+
+      return { shouldWake: false };
+    } catch (error) {
+      logger.error("check_pending_payments failed", error instanceof Error ? error : undefined);
+      return { shouldWake: false };
+    }
+  },
+
   check_social_inbox: async (_ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
     if (!taskCtx.social) return { shouldWake: false };
 

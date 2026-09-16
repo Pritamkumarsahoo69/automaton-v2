@@ -146,6 +146,16 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
       "Max daily inference spend (cents)", DEFAULT_TREASURY_POLICY.maxInferenceDailyCents),
     requireConfirmationAboveCents: await promptWithDefault(
       "Require confirmation above (cents)", DEFAULT_TREASURY_POLICY.requireConfirmationAboveCents),
+    // USDC-on-Base payment rails (Phase 5)
+    maxUsdcSingleTransfer: await promptWithDefault(
+      "Max USDC single transfer (cents)", DEFAULT_TREASURY_POLICY.maxUsdcSingleTransfer),
+    maxUsdcHourlyTransfer: await promptWithDefault(
+      "Max USDC hourly transfers (cents)", DEFAULT_TREASURY_POLICY.maxUsdcHourlyTransfer),
+    maxUsdcDailyTransfer: await promptWithDefault(
+      "Max USDC daily transfers (cents)", DEFAULT_TREASURY_POLICY.maxUsdcDailyTransfer),
+    usdcAllowedRecipients: DEFAULT_TREASURY_POLICY.usdcAllowedRecipients,
+    requireUsdcConfirmationAbove: await promptWithDefault(
+      "USDC confirmation required above (cents)", DEFAULT_TREASURY_POLICY.requireUsdcConfirmationAbove),
   };
 
   console.log(chalk.green("  Treasury policy configured.\n"));

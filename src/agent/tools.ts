@@ -19,6 +19,7 @@ import type {
   InputSource,
   SpendTrackerInterface,
 } from "../types.js";
+import { DEFAULT_TREASURY_POLICY } from "../types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import { sanitizeToolResult, sanitizeInput } from "./injection-defense.js";
 import { createLogger } from "../observability/logger.js";
@@ -1039,6 +1040,146 @@ Model: ${ctx.inference.getDefaultModel()}
         });
 
         return `Credit transfer submitted: $${(amount / 100).toFixed(2)} to ${transfer.toAddress} (status: ${transfer.status}, id: ${transfer.transferId || "n/a"})`;
+      },
+    },
+
+    // ── USDC Payment Rails (Phase 5) ──
+    {
+      name: "send_usdc",
+      description: "Send USDC directly to a Base address. Use for paying others or moving your USDC.",
+      category: "financial",
+      riskLevel: "dangerous",
+      parameters: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Recipient Base address (0x...)" },
+          amount_usd: { type: "number", description: "Amount in USD/USDC" },
+          reference: { type: "string", description: "Optional reference/note for the transfer" },
+        },
+        required: ["to", "amount_usd"],
+      },
+      execute: async (args, ctx) => {
+        const chainType = ctx.config.chainType || ctx.identity.chainType || "evm";
+        if (chainType !== "evm") {
+          return "USDC transfers require an EVM wallet (Base).";
+        }
+
+        const to = args.to as string;
+        const amountUsd = args.amount_usd as number;
+        if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
+          return `Blocked: amount_usd must be positive, got ${amountUsd}.`;
+        }
+
+        // Check USDC balance first
+        const { getUsdcBalance } = await import("../conway/x402.js");
+        const balance = await getUsdcBalance(ctx.identity.address, "eip155:8453");
+        if (amountUsd > balance) {
+          return `Blocked: insufficient USDC. Balance: $${balance.toFixed(2)}, requested: $${amountUsd}.`;
+        }
+
+        // Enforce hourly/daily USDC caps (defense-in-depth, per-tool aggregation)
+        const treasury = ctx.config.treasuryPolicy ?? DEFAULT_TREASURY_POLICY;
+        const now = new Date();
+        const hourWindow = now.toISOString().slice(0, 13);
+        const dayWindow = now.toISOString().slice(0, 10);
+        const usdcSpendRow = ctx.db.raw
+          .prepare(
+            `SELECT
+               COALESCE(SUM(CASE WHEN window_hour = ? THEN amount_cents ELSE 0 END), 0) AS hour_total,
+               COALESCE(SUM(CASE WHEN window_day = ? THEN amount_cents ELSE 0 END), 0) AS day_total
+             FROM spend_tracking
+             WHERE tool_name = 'send_usdc'`,
+          )
+          .get(hourWindow, dayWindow) as { hour_total: number; day_total: number };
+        const amountCents = Math.round(amountUsd * 100);
+        if (usdcSpendRow.hour_total + amountCents > treasury.maxUsdcHourlyTransfer) {
+          return `Blocked: USDC transfer would exceed hourly cap ($${(treasury.maxUsdcHourlyTransfer / 100).toFixed(2)}/hr). Current: $${(usdcSpendRow.hour_total / 100).toFixed(2)}.`;
+        }
+        if (usdcSpendRow.day_total + amountCents > treasury.maxUsdcDailyTransfer) {
+          return `Blocked: USDC transfer would exceed daily cap ($${(treasury.maxUsdcDailyTransfer / 100).toFixed(2)}/day). Current: $${(usdcSpendRow.day_total / 100).toFixed(2)}.`;
+        }
+
+        const { sendUsdc } = await import("../payment/usdc.js");
+        const result = await sendUsdc({
+          to: to as `0x${string}`,
+          amountUsd,
+          account: ctx.identity.account,
+          network: "eip155:8453",
+          db: ctx.db.raw,
+          reference: args.reference as string | undefined,
+        });
+
+        if (!result.success) {
+          return `USDC transfer failed: ${result.error}`;
+        }
+
+        return `USDC transfer submitted: $${amountUsd} to ${to}. Tx: ${result.txHash}`;
+      },
+    },
+
+    {
+      name: "create_payment_request",
+      description: "Create a payment request (invoice) for USDC on Base. The payer sends USDC to your wallet.",
+      category: "financial",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          amount_usd: { type: "number", description: "Amount in USD/USDC" },
+          payer: { type: "string", description: "Payer's Base address (0x...)" },
+          reference: { type: "string", description: "Invoice or reference number" },
+          description: { type: "string", description: "Description of what this payment is for" },
+          expires_in_hours: { type: "number", description: "Hours until request expires (default: 72)" },
+        },
+        required: ["amount_usd", "payer"],
+      },
+      execute: async (args, ctx) => {
+        const { createPaymentRequest } = await import("../payment/requests.js");
+
+        const request = createPaymentRequest(ctx.db.raw, {
+          amountUsd: args.amount_usd as number,
+          payer: args.payer as `0x${string}`,
+          reference: args.reference as string | undefined,
+          description: args.description as string | undefined,
+          expiresInHours: args.expires_in_hours as number | undefined,
+        });
+
+        return `Payment request created: ${request.id}
+Amount: $${request.amountUsd}
+Payer: ${request.payer}
+Reference: ${request.reference || "n/a"}
+Status: ${request.status}
+Created: ${request.createdAt}`;
+      },
+    },
+
+    {
+      name: "list_payment_requests",
+      description: "List your payment requests, optionally filtered by status.",
+      category: "financial",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", description: "Filter by status: pending, paid, expired, cancelled" },
+        },
+      },
+      execute: async (args, ctx) => {
+        const { listPaymentRequests } = await import("../payment/requests.js");
+
+        const requests = listPaymentRequests(ctx.db.raw, {
+          status: args.status as "pending" | "paid" | "expired" | "cancelled" | undefined,
+        });
+
+        if (requests.length === 0) {
+          return "No payment requests found.";
+        }
+
+        const lines = requests.map(r =>
+          `${r.id.slice(0,8)}... | $${r.amountUsd} | ${r.status} | ${r.payer.slice(0,10)}... | ${r.reference || "-"}`
+        );
+
+        return `Payment Requests (${requests.length}):\nID | Amount | Status | Payer | Ref\n` + lines.join("\n");
       },
     },
 
