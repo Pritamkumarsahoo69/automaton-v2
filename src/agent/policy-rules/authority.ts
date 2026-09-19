@@ -61,6 +61,12 @@ const EXTERNAL_BLOCKED_TOOLS = [
   "update_genesis_prompt",
 ] as const;
 
+const EXTERNAL_REVENUE_BLOCKED_TOOLS = [
+  "quote_revenue_job",
+  "start_paid_job",
+  "record_job_delivery",
+] as const;
+
 /**
  * Deny specific high-risk tools when input comes from external sources.
  * Only agent-initiated or creator turns can use these tools.
@@ -120,11 +126,35 @@ function createSelfModFromExternalRule(): PolicyRule {
 }
 
 /**
+ * Deny revenue execution tools from external/heartbeat input sources.
+ * Only agent-initiated or creator turns can quote, start, or deliver.
+ */
+function createExternalRevenueToolRestrictionRule(): PolicyRule {
+  return {
+    id: "authority.external_revenue_tool_restriction",
+    description: "Deny revenue execution tools from external/heartbeat input sources",
+    priority: 400,
+    appliesTo: { by: "name", names: [...EXTERNAL_REVENUE_BLOCKED_TOOLS] },
+    evaluate(request: PolicyRequest): PolicyRuleResult | null {
+      if (isExternalSource(request.turnContext.inputSource)) {
+        return deny(
+          "authority.external_revenue_tool_restriction",
+          "EXTERNAL_REVENUE_TOOL",
+          `External input (source: ${request.turnContext.inputSource ?? "undefined"}) cannot use revenue execution tool "${request.tool.name}"`,
+        );
+      }
+      return null;
+    },
+  };
+}
+
+/**
  * Create all authority policy rules.
  */
 export function createAuthorityRules(): PolicyRule[] {
   return [
     createExternalToolRestrictionRule(),
     createSelfModFromExternalRule(),
+    createExternalRevenueToolRestrictionRule(),
   ];
 }

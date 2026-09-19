@@ -180,6 +180,7 @@ export type ToolCategory =
   | "conway"
   | "self_mod"
   | "financial"
+  | "revenue"
   | "survival"
   | "skills"
   | "git"

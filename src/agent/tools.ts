@@ -19,7 +19,7 @@ import type {
   InputSource,
   SpendTrackerInterface,
 } from "../types.js";
-import { DEFAULT_TREASURY_POLICY } from "../types.js";
+import { DEFAULT_TREASURY_POLICY, DEFAULT_REVENUE_POLICY } from "../types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import { sanitizeToolResult, sanitizeInput } from "./injection-defense.js";
 import { createLogger } from "../observability/logger.js";
@@ -1180,6 +1180,178 @@ Created: ${request.createdAt}`;
         );
 
         return `Payment Requests (${requests.length}):\nID | Amount | Status | Payer | Ref\n` + lines.join("\n");
+      },
+    },
+
+    // ── Revenue Tools ──
+    {
+      name: "create_revenue_job",
+      description: "Create a new revenue job from customer input. Returns a draft job ready for quoting.",
+      category: "revenue",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          customer_address: { type: "string", description: "Customer Base address (0x...)" },
+          job_type: { type: "string", description: "Work type: research, writing, data_analysis, code_change, code_review, file_generation, hosted_service" },
+          scope: { type: "string", description: "Plain-language description of the work requested" },
+          price_cents: { type: "number", description: "Agreed price in cents (e.g. 5000 = $50.00)" },
+          budget_cents: { type: "number", description: "Max compute budget in cents (default: min of price or 500)" },
+        },
+        required: ["customer_address", "job_type", "scope", "price_cents"],
+      },
+      execute: async (args, ctx) => {
+        const policy = ctx.config.revenuePolicy ?? DEFAULT_REVENUE_POLICY;
+        if (!policy.enabled) {
+          return "Revenue job engine is disabled. Enable via revenuePolicy.enabled in config.";
+        }
+
+        const { createRevenueJob } = await import("../revenue/jobs.js");
+        const job = createRevenueJob(ctx.db.raw, {
+          customerAddress: args.customer_address as string,
+          jobType: args.job_type as any,
+          scope: args.scope as string,
+          priceCents: args.price_cents as number,
+          budgetCents: args.budget_cents as number | undefined,
+        }, policy, "external");
+
+        return `Revenue job created: ${job.id}\nType: ${job.jobType}\nPrice: $${(job.priceCents / 100).toFixed(2)}\nBudget: $${(job.budgetCents / 100).toFixed(2)}\nStatus: ${job.status}`;
+      },
+    },
+
+    {
+      name: "quote_revenue_job",
+      description: "Quote a draft revenue job: lock scope/price, create a linked USDC payment request with a block checkpoint.",
+      category: "revenue",
+      riskLevel: "caution",
+      parameters: {
+        type: "object",
+        properties: {
+          job_id: { type: "string", description: "Revenue job ID (ULID)" },
+          expires_in_hours: { type: "number", description: "Invoice expiry in hours (1-720, default: 72)" },
+        },
+        required: ["job_id"],
+      },
+      execute: async (args, ctx) => {
+        const policy = ctx.config.revenuePolicy ?? DEFAULT_REVENUE_POLICY;
+        if (!policy.enabled) {
+          return "Revenue job engine is disabled.";
+        }
+
+        const { quoteRevenueJob } = await import("../revenue/quotes.js");
+        const { getBaseBlockCheckpoint } = await import("../payment/requests.js");
+
+        const expiresInHours = (args.expires_in_hours as number) || 72;
+        const result = await quoteRevenueJob(ctx.db.raw, {
+          jobId: args.job_id as string,
+          expiresInHours,
+          actor: "agent",
+          blockProvider: { getBlockNumber: () => getBaseBlockCheckpoint("eip155:8453") },
+        });
+
+        return `Job quoted: ${result.job.id}\nInvoice: ${result.paymentRequest.id}\nAmount: $${result.paymentRequest.amountUsd.toFixed(2)}\nPayer: ${result.paymentRequest.payer}\nExpires: ${result.paymentRequest.expiresAt}\nBlock checkpoint: ${result.paymentRequest.paymentNotBeforeBlock}`;
+      },
+    },
+
+    {
+      name: "start_paid_job",
+      description: "Start execution of a paid revenue job after verified USDC payment. Creates an orchestration goal.",
+      category: "revenue",
+      riskLevel: "dangerous",
+      parameters: {
+        type: "object",
+        properties: {
+          job_id: { type: "string", description: "Revenue job ID (ULID)" },
+        },
+        required: ["job_id"],
+      },
+      execute: async (args, ctx) => {
+        const policy = ctx.config.revenuePolicy ?? DEFAULT_REVENUE_POLICY;
+        if (!policy.enabled) {
+          return "Revenue job engine is disabled.";
+        }
+
+        const { startPaidRevenueJob } = await import("../revenue/execution.js");
+        try {
+          const job = startPaidRevenueJob(ctx.db.raw, args.job_id as string, policy, "agent");
+          return `Job started: ${job.id}
+Status: ${job.status}
+Goal: ${job.goalId}
+Price: ${(job.priceCents / 100).toFixed(2)}`;
+        } catch (e: any) {
+          return `Error: ${e.message}`;
+        }
+      },
+    },
+
+    {
+      name: "record_job_delivery",
+      description: "Record delivery evidence for an executing revenue job. Validates file hashes, Git commits, or service URLs.",
+      category: "revenue",
+      riskLevel: "caution",
+      parameters: {
+        type: "object",
+        properties: {
+          job_id: { type: "string", description: "Revenue job ID (ULID)" },
+          evidence_json: { type: "string", description: "JSON array of evidence items. Examples: [{\"kind\":\"file\",\"path\":\"/output/report.md\",\"sha256\":\"abc...\"}] or [{\"kind\":\"service\",\"url\":\"https://myservice.example\",\"sandboxId\":\"xxx\"}]" },
+        },
+        required: ["job_id", "evidence_json"],
+      },
+      execute: async (args, ctx) => {
+        const policy = ctx.config.revenuePolicy ?? DEFAULT_REVENUE_POLICY;
+
+        let evidence: any;
+        try {
+          evidence = JSON.parse(args.evidence_json as string);
+          if (!Array.isArray(evidence)) {
+            return "Evidence must be a JSON array.";
+          }
+        } catch {
+          return "Invalid JSON in evidence_json.";
+        }
+
+        const { recordRevenueJobDelivery } = await import("../revenue/delivery.js");
+        const job = await recordRevenueJobDelivery(ctx.db.raw, {
+          jobId: args.job_id as string,
+          evidence,
+          actor: "agent",
+          identity: ctx.identity,
+          policy,
+        });
+
+        return `Job delivered: ${job.id}\nStatus: ${job.status}\nEvidence: ${evidence.length} item(s)`;
+      },
+    },
+
+    {
+      name: "list_revenue_jobs",
+      description: "List revenue jobs with optional status/customer filters.",
+      category: "revenue",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", description: "Filter by status" },
+          customer_address: { type: "string", description: "Filter by customer address" },
+        },
+      },
+      execute: async (args, ctx) => {
+        const { listRevenueJobs } = await import("../revenue/jobs.js");
+
+        const jobs = listRevenueJobs(ctx.db.raw, {
+          status: args.status as any,
+          customerAddress: args.customer_address as string,
+        });
+
+        if (jobs.length === 0) {
+          return "No revenue jobs found.";
+        }
+
+        const lines = jobs.map(j =>
+          `${j.id.slice(0, 8)}... | ${j.jobType} | ${j.status} | $${(j.priceCents / 100).toFixed(2)} | payment=${j.paymentRequestId?.slice(0, 8) || "-"} | goal=${j.goalId?.slice(0, 8) || "-"}`,
+        );
+
+        return `Revenue Jobs (${jobs.length}):\nID | Type | Status | Price | Payment | Goal\n` + lines.join("\n");
       },
     },
 
